@@ -1,0 +1,19 @@
+name: Weekly retrain
+
+# Triggers a Render redeploy every Monday. The Docker build retrains on the latest 365 days,
+# so the live model never falls more than a week behind the grid.
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+jobs:
+  redeploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render deploy hook
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$HOOK" ]; then echo "RENDER_DEPLOY_HOOK_URL secret not set"; exit 1; fi
+          curl -fsS -X POST "$HOOK"

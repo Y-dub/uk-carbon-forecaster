@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+# Model artefacts are rebuilt on every deploy; raw data is re-fetchable.
+models/*
+!models/.gitkeep
+data/

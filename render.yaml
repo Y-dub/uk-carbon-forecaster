@@ -1,0 +1,12 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: uk-carbon-forecaster
+    runtime: docker
+    plan: free
+    region: frankfurt
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: FORECAST_CACHE_SECONDS
+        value: "900"
