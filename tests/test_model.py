@@ -31,3 +31,12 @@ def test_backtest_beats_persistence(raw):
     assert 0 <= summary["interval"]["empirical_coverage_pct"] <= 100
     # Every fold's test origins come after its training cutoff.
     assert (preds["origin"] >= preds["fold_cutoff"]).all()
+
+
+def test_shrinkage_weights_bounded_per_horizon(fitted_model):
+    assert sorted(fitted_model.shrinkage) == list(range(1, 25))
+    assert all(0.0 <= w <= 1.0 for w in fitted_model.shrinkage.values())
+
+
+def test_one_model_per_horizon_hour(fitted_model):
+    assert sorted(fitted_model.models) == list(range(1, 25))

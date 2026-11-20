@@ -1,4 +1,4 @@
-"""Gradient-boosted direct multi-horizon forecaster with split-conformal prediction intervals."""
+"""Direct multi-horizon gradient boosting with learned shrinkage and split-conformal intervals."""
 
 from __future__ import annotations
 
@@ -30,63 +30,88 @@ def _regressor() -> HistGradientBoostingRegressor:
     )
 
 
-def _horizon_hour(horizon: pd.Series | np.ndarray) -> np.ndarray:
+def horizon_hour(horizon: pd.Series | np.ndarray) -> np.ndarray:
+    """Map half-hour steps 1..48 to forecast hours 1..24."""
     return np.ceil(np.asarray(horizon) / 2).astype(int)
+
+
+def _fit_per_hour(rows: pd.DataFrame) -> dict[int, HistGradientBoostingRegressor]:
+    """One regressor per horizon hour, each predicting the change from the latest value.
+
+    A single pooled model shares leaves across horizons, so short horizons (small changes) inherit
+    the large changes typical of long horizons. Separate models remove that interference.
+    """
+    hh = horizon_hour(rows["horizon"])
+    return {
+        int(h): _regressor().fit(g[FEATURES], g["target"] - g["lag_0"])
+        for h, g in rows.groupby(hh)
+    }
+
+
+def _predict_change(models: dict[int, HistGradientBoostingRegressor], rows: pd.DataFrame) -> np.ndarray:
+    hh = horizon_hour(rows["horizon"])
+    out = np.full(len(rows), np.nan)
+    for h in np.unique(hh):
+        mask = hh == h
+        out[mask] = models[int(h)].predict(rows.loc[mask, FEATURES])
+    return out
 
 
 @dataclass
 class CarbonForecaster:
-    """One gradient-boosting model for every horizon (horizon is a feature).
+    """Forecasts carbon intensity as ``latest value + shrinkage[h] * predicted change[h]``.
 
-    The target is the change from the latest observed value (``lag_0``), not the raw level: tree models
-    cannot extrapolate beyond levels seen in training, and the grid keeps decarbonising.
-
-    Prediction intervals are split-conformal: a copy of the model is trained without the most recent
-    ``calib_days``, its errors on those days are measured per horizon hour, and the empirical quantiles
-    of those errors become the interval offsets around the final model's forecast.
+    Fitting holds out the most recent ``calib_days``. A model trained without them is scored on them to
+    learn, for each horizon hour,
+      * a shrinkage weight in [0, 1] (least squares, clipped) that pulls the predicted change towards
+        "no change" where the model's signal is weak, typically at long horizons without weather inputs;
+      * split-conformal interval offsets: empirical quantiles of the shrunk forecast's errors.
+    The final models are then refit on all data and reuse those weights and offsets.
     """
 
     quantiles: tuple[float, float] = config.QUANTILES
     origin_stride: int = 2
     calib_days: int = 14
-    model: HistGradientBoostingRegressor | None = None
+    models: dict[int, HistGradientBoostingRegressor] = field(default_factory=dict)
+    shrinkage: dict[int, float] = field(default_factory=dict)
     interval_offsets: dict[int, tuple[float, float]] = field(default_factory=dict)
     metadata: dict = field(default_factory=dict)
 
-    @staticmethod
-    def _fit_model(rows: pd.DataFrame) -> HistGradientBoostingRegressor:
-        return _regressor().fit(rows[FEATURES], rows["target"] - rows["lag_0"])
-
-    def fit(self, y: pd.Series, with_intervals: bool = True) -> CarbonForecaster:
+    def fit(self, y: pd.Series, calibrate: bool = True) -> CarbonForecaster:
         rows = training_rows(y, origin_stride=self.origin_stride)
         if len(rows) < 1000:
             raise ValueError(f"Not enough complete training rows ({len(rows)}); fetch more history.")
 
-        self.interval_offsets = {}
+        self.shrinkage, self.interval_offsets = {}, {}
         n_calib = 0
-        if with_intervals:
+        if calibrate:
             cutoff = rows["target_time"].max() - pd.Timedelta(days=self.calib_days)
             proper = rows[rows["target_time"] < cutoff]  # no target overlaps the calibration window
             calib = rows[rows["origin"] >= cutoff]
             if len(proper) >= 1000 and len(calib) >= 200:
-                m0 = self._fit_model(proper)
-                resid = calib["target"] - (calib["lag_0"] + m0.predict(calib[FEATURES]))
+                change_pred = _predict_change(_fit_per_hour(proper), calib)
+                change_true = (calib["target"] - calib["lag_0"]).to_numpy()
+                hh = horizon_hour(calib["horizon"])
                 lo_q, hi_q = self.quantiles
-                grouped = resid.groupby(_horizon_hour(calib["horizon"]))
-                self.interval_offsets = {
-                    int(h): (float(g.quantile(lo_q)), float(g.quantile(hi_q))) for h, g in grouped
-                }
+                for h in np.unique(hh):
+                    m = hh == h
+                    p, t = change_pred[m], change_true[m]
+                    w = float(np.clip(np.dot(p, t) / max(np.dot(p, p), 1e-9), 0.0, 1.0))
+                    resid = t - w * p
+                    self.shrinkage[int(h)] = w
+                    self.interval_offsets[int(h)] = (float(np.quantile(resid, lo_q)), float(np.quantile(resid, hi_q)))
                 n_calib = int(len(calib))
 
-        self.model = self._fit_model(rows)
+        self.models = _fit_per_hour(rows)
         self.metadata = {
             "trained_at": datetime.now(UTC).isoformat(timespec="seconds"),
             "trained_from": y.dropna().index.min().isoformat(),
             "trained_until": y.dropna().index.max().isoformat(),
             "n_training_rows": int(len(rows)),
             "n_calibration_rows": n_calib,
-            "target": "change from latest observed value (lag_0)",
+            "target": "change from latest observed value, one model per horizon hour",
             "features": FEATURES,
+            "shrinkage_by_horizon_hour": {h: round(w, 3) for h, w in self.shrinkage.items()},
             "max_horizon_hours": config.MAX_HORIZON / 2,
             "interval": f"{round((self.quantiles[1] - self.quantiles[0]) * 100)}% split-conformal"
             if self.interval_offsets
@@ -96,14 +121,15 @@ class CarbonForecaster:
 
     def predict_rows(self, rows: pd.DataFrame) -> pd.DataFrame:
         """Predict for prepared feature rows. Adds ``point`` and, if calibrated, ``lower``/``upper``."""
-        if self.model is None:
+        if not self.models:
             raise RuntimeError("Model is not fitted")
         out = rows.copy()
-        out["point"] = rows["lag_0"].to_numpy() + self.model.predict(rows[FEATURES])
+        hh = horizon_hour(rows["horizon"])
+        weight = np.array([self.shrinkage.get(int(h), 1.0) for h in hh])
+        out["point"] = rows["lag_0"].to_numpy() + weight * _predict_change(self.models, rows)
         if self.interval_offsets:
-            hh = _horizon_hour(rows["horizon"])
-            lo = np.array([self.interval_offsets.get(h, (np.nan, np.nan))[0] for h in hh])
-            hi = np.array([self.interval_offsets.get(h, (np.nan, np.nan))[1] for h in hh])
+            lo = np.array([self.interval_offsets[int(h)][0] for h in hh])
+            hi = np.array([self.interval_offsets[int(h)][1] for h in hh])
             out["lower"] = out["point"] + np.minimum(lo, 0)
             out["upper"] = out["point"] + np.maximum(hi, 0)
         # Carbon intensity cannot be negative.
@@ -116,7 +142,8 @@ class CarbonForecaster:
         """Forecast the next ``horizon_steps`` half-hours from the latest observed value in ``y``."""
         origin = latest_origin(y)
         rows = build_dataset(y, origins=pd.DatetimeIndex([origin]), horizons=range(1, horizon_steps + 1))
-        missing = rows[FEATURES].columns[rows[FEATURES].isna().any()].tolist()
+        needed = FEATURES + ["lag_0"]
+        missing = rows[needed].columns[rows[needed].isna().any()].tolist()
         if missing:
             raise ValueError(f"Insufficient recent history to build features: {missing}")
         return self.predict_rows(rows)

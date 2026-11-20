@@ -52,15 +52,15 @@ def plot_by_horizon(summary: dict, path: Path) -> None:
         "model": "Gradient boosting (this project)",
         "persistence": "Persistence (last value)",
         "seasonal_naive_24h": "Same time yesterday",
-        "seasonal_naive_7d": "Same time last week",
-    }
+    }  # "same time last week" stays in the table; on the plot its much larger error flattens the rest
     fig, ax = plt.subplots(figsize=(8, 4.5))
     for key, label in labels.items():
-        series = summary["mae_by_horizon_hour"][key]
+        series = {int(h): v for h, v in summary["mae_by_horizon_hour"][key].items()}
         hours = sorted(series)
         ax.plot(hours, [series[h] for h in hours], label=label, linewidth=2.5 if key == "model" else 1.5)
     ax.set_xlabel("Forecast horizon (hours ahead)")
     ax.set_ylabel("MAE (gCO2/kWh)")
+    ax.set_ylim(bottom=0)
     ax.set_title("Backtest error by horizon, UK national carbon intensity")
     ax.grid(alpha=0.3)
     ax.legend(frameon=False)

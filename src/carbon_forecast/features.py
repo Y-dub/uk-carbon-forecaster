@@ -16,9 +16,11 @@ from . import config
 
 STEP = pd.Timedelta(config.FREQ)
 
-FEATURES = [
-    "horizon",
-    "lag_0",
+# Level-type inputs enter only relative to the latest value (lag_0). With the absolute level available,
+# the model learns to pull forecasts towards the training-period average, which biases them whenever the
+# grid is unusually clean or dirty (e.g. a cold, still November). Day-of-year terms are left out because
+# one or two years of history cannot separate seasonality from that year's weather.
+RELATIVE_TO_LATEST = [
     "lag_1",
     "lag_2",
     "lag_4",
@@ -26,6 +28,12 @@ FEATURES = [
     "same_slot_last_week",
     "mean_3h",
     "mean_24h",
+    "mean_7d",
+]
+
+FEATURES = [
+    "horizon",
+    *(f"{c}_rel" for c in RELATIVE_TO_LATEST),
     "std_24h",
     "change_24h",
     "slot",
@@ -34,8 +42,6 @@ FEATURES = [
     "day_of_week",
     "is_weekend",
     "is_holiday",
-    "doy_sin",
-    "doy_cos",
 ]
 
 
@@ -72,6 +78,7 @@ def build_dataset(
     mean_3h = y.rolling(6, min_periods=6).mean()
     mean_24h = y.rolling(config.STEPS_PER_DAY, min_periods=config.STEPS_PER_DAY).mean()
     std_24h = y.rolling(config.STEPS_PER_DAY, min_periods=config.STEPS_PER_DAY).std()
+    mean_7d = y.rolling(config.STEPS_PER_WEEK, min_periods=config.STEPS_PER_WEEK).mean()
 
     n_o, n_h = len(origins), len(horizons)
     origin_rep = origins.repeat(n_h)
@@ -92,11 +99,15 @@ def build_dataset(
             "same_slot_last_week": _lookup(y, target_time - pd.Timedelta(days=7)),
             "mean_3h": _lookup(mean_3h, origin_rep),
             "mean_24h": _lookup(mean_24h, origin_rep),
+            "mean_7d": _lookup(mean_7d, origin_rep),
             "std_24h": _lookup(std_24h, origin_rep),
             "change_24h": lag_0 - _lookup(y, origin_rep - pd.Timedelta(days=1)),
             "target": _lookup(y, target_time),
         }
     )
+
+    for c in RELATIVE_TO_LATEST:
+        df[f"{c}_rel"] = df[c] - df["lag_0"]
 
     tt = pd.DatetimeIndex(target_time)
     # Calendar features use UK local time, because demand follows local clocks (GMT/BST).
@@ -109,9 +120,6 @@ def build_dataset(
     df["is_weekend"] = (df["day_of_week"] >= 5).astype(int)
     hol = _uk_holidays()
     df["is_holiday"] = np.fromiter((d in hol for d in local.date), dtype=int, count=len(local))
-    doy = local.dayofyear.to_numpy()
-    df["doy_sin"] = np.sin(2 * np.pi * doy / 365.25)
-    df["doy_cos"] = np.cos(2 * np.pi * doy / 365.25)
     return df
 
 
@@ -119,7 +127,7 @@ def training_rows(y: pd.Series, origin_stride: int = 2) -> pd.DataFrame:
     """Complete rows (all features and target known), using every ``origin_stride``-th origin."""
     origins = y.index[:: max(1, origin_stride)]
     df = build_dataset(y, origins=origins)
-    return df.dropna(subset=FEATURES + ["target"]).reset_index(drop=True)
+    return df.dropna(subset=FEATURES + ["lag_0", "target"]).reset_index(drop=True)
 
 
 def latest_origin(y: pd.Series) -> pd.Timestamp:
