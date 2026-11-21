@@ -1,9 +1,20 @@
 FROM python:3.12-slim
 
+# ENV PYTHONDONTWRITEBYTECODE=1 \
+#     PYTHONUNBUFFERED=1 \
+#     PIP_NO_CACHE_DIR=1 \
+#     MODEL_DIR=/app/models
+
+# Render's containers report the host's CPU count but only get a fraction of one CPU.
+# Without these limits, scikit-learn/OpenMP start dozens of threads that contend and stall.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    MODEL_DIR=/app/models
+    MODEL_DIR=/app/models \
+    OMP_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1 \
+    LOKY_MAX_CPU_COUNT=1
 
 WORKDIR /app
 
