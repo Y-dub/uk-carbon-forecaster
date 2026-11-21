@@ -14,7 +14,7 @@ RUN pip install .
 # Train at build time on the latest data, so every deploy (including the weekly scheduled one)
 # ships a model trained up to that day. The backtest results are baked into /model.
 # CI overrides this with "--synthetic --days 60 --skip-backtest" so builds don't depend on the live API.
-ARG TRAIN_ARGS="--days 365 --folds 6"
+ARG TRAIN_ARGS="--days 180 --folds 6"
 RUN python -m carbon_forecast.train ${TRAIN_ARGS}
 
 RUN useradd --create-home appuser && chown -R appuser /app
