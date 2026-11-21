@@ -20,6 +20,8 @@ from .data import UpstreamError, clean_series, fetch_official_forecast, fetch_re
 from .model import CarbonForecaster
 from .synthetic import synthetic_intensity
 
+from fastapi.responses import RedirectResponse
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("carbon_forecast.api")
 
@@ -182,14 +184,17 @@ def _build_forecast(model: CarbonForecaster, hours: int, window_hours: int) -> F
 
 # ---------- endpoints ----------
 
-@app.get("/", include_in_schema=False)
-def root() -> dict:
-    return {
-        "service": app.title,
-        "docs": "/docs",
-        "endpoints": {"/forecast": "live forecast", "/model": "model card and backtest", "/health": "health"},
-    }
+# @app.get("/", include_in_schema=False)
+# def root() -> dict:
+#     return {
+#         "service": app.title,
+#         "docs": "/docs",
+#         "endpoints": {"/forecast": "live forecast", "/model": "model card and backtest", "/health": "health"},
+#     }
 
+@app.get("/", include_in_schema=False)
+def root() -> RedirectResponse:
+    return RedirectResponse(url="/docs")
 
 @app.get("/health", response_model=Health)
 def health() -> Health:
