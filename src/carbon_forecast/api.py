@@ -13,14 +13,13 @@ from datetime import UTC, datetime, timedelta
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from . import __version__, config
 from .data import UpstreamError, clean_series, fetch_official_forecast, fetch_recent
 from .model import CarbonForecaster
 from .synthetic import synthetic_intensity
-
-from fastapi.responses import RedirectResponse
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("carbon_forecast.api")
