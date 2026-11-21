@@ -5,7 +5,8 @@ calibrated prediction intervals, and serves it as a production API. In a 6-week 
 naive baseline by 13.7% (MAE), and beats both persistence and "same time yesterday" at every horizon up
 to 14 hours ahead.
 
-**Live API:** `https://<your-service>.onrender.com/docs` &nbsp;·&nbsp; ![CI](https://github.com/Y-dub/uk-carbon-forecaster/actions/workflows/ci.yml/badge.svg)
+<!-- **Live API:** `https://<your-service>.onrender.com/docs` &nbsp;·&nbsp; ![CI](https://github.com/Y-dub/uk-carbon-forecaster/actions/workflows/ci.yml/badge.svg) -->
+**Live API:** [uk-carbon-forecaster.onrender.com/docs](https://uk-carbon-forecaster.onrender.com/docs) &nbsp;·&nbsp; ![CI](https://github.com/Y-dub/uk-carbon-forecaster/actions/workflows/ci.yml/badge.svg)
 
 Knowing when the grid will be cleanest lets flexible demand (EV charging, heat pumps, batteries, data
 centre workloads) shift to low-carbon periods. The `/forecast` endpoint returns a half-hourly forecast
