@@ -183,17 +183,10 @@ def _build_forecast(model: CarbonForecaster, hours: int, window_hours: int) -> F
 
 # ---------- endpoints ----------
 
-# @app.get("/", include_in_schema=False)
-# def root() -> dict:
-#     return {
-#         "service": app.title,
-#         "docs": "/docs",
-#         "endpoints": {"/forecast": "live forecast", "/model": "model card and backtest", "/health": "health"},
-#     }
-
 @app.get("/", include_in_schema=False)
 def root() -> RedirectResponse:
     return RedirectResponse(url="/docs")
+
 
 @app.get("/health", response_model=Health)
 def health() -> Health:

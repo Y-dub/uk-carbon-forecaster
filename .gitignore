@@ -8,3 +8,5 @@ __pycache__/
 models/*
 !models/.gitkeep
 data/
+mlruns/
+mlflow.db

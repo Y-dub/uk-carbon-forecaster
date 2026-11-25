@@ -5,8 +5,7 @@ calibrated prediction intervals, and serves it as a production API. In a 6-week 
 naive baseline by 13.7% (MAE), and beats both persistence and "same time yesterday" at every horizon up
 to 14 hours ahead.
 
-<!-- **Live API:** `https://<your-service>.onrender.com/docs` &nbsp;·&nbsp; ![CI](https://github.com/Y-dub/uk-carbon-forecaster/actions/workflows/ci.yml/badge.svg) -->
-**Live API:** [uk-carbon-forecaster.onrender.com/docs](https://uk-carbon-forecaster.onrender.com/docs) &nbsp;·&nbsp; ![CI](https://github.com/Y-dub/uk-carbon-forecaster/actions/workflows/ci.yml/badge.svg)
+**Live API:** `https://<your-service>.onrender.com/docs` &nbsp;·&nbsp; ![CI](https://github.com/Y-dub/uk-carbon-forecaster/actions/workflows/ci.yml/badge.svg)
 
 Knowing when the grid will be cleanest lets flexible demand (EV charging, heat pumps, batteries, data
 centre workloads) shift to low-carbon periods. The `/forecast` endpoint returns a half-hourly forecast
@@ -126,6 +125,38 @@ Offline: `python -m carbon_forecast.train --synthetic --days 90` then `CARBON_SY
 - **Retraining:** a scheduled workflow triggers a Render redeploy every Monday, which retrains the model
   on the latest data.
 
+## Experiment tracking on Databricks (MLflow)
+
+The `databricks/` notebooks run the same package on Databricks: the data as a Delta table, every
+backtest logged as an MLflow run, the best configuration registered in Unity Catalog with a
+`champion` alias, and a batch job that forecasts with the champion and scores past forecasts against
+actuals. Setup takes about 15 minutes on the free Databricks Free Edition: see
+[docs/databricks.md](docs/databricks.md).
+
+| Notebook | What it does |
+| --- | --- |
+| `00_setup_and_ingest` | Unity Catalog schema and volume, data checks in Spark, Delta table |
+| `01_experiments` | Ablation grid and gradient-boosting sweep as nested MLflow runs: params, metrics, MAE at each horizon hour, charts |
+| `02_register_champion` | Refits the best run on all data, logs a pyfunc model with signature, registers it, promotes it to `champion` only if it beats the current one |
+| `03_batch_forecast` | Forecasts with `@champion`, appends to a Delta table, reports accuracy by horizon and model version |
+
+The ablation grid regenerates the model-development table above as tracked runs (same year of data,
+6-fold backtest), instead of numbers copied by hand:
+
+| MLflow run | MAE | Bias | MAE at 1h | 80% interval coverage |
+| --- | --- | --- | --- | --- |
+| `pooled_with_absolute_level` (control) | 32.28 | −9.65 | 12.72 | 74.3% |
+| `pooled_no_shrinkage` (v3) | 29.61 | −1.81 | 10.57 | 79.8% |
+| `per_hour_no_shrinkage` (v4) | 29.13 | −0.35 | 4.81 | 78.8% |
+| **`per_hour_with_shrinkage` (v5, production)** | **27.11** | **−0.37** | **4.73** | **77.9%** |
+
+![Ablations: error by horizon, from MLflow metric history](docs/mlflow_ablations_mae_by_horizon.png)
+
+The tracking code lives in `src/carbon_forecast/tracking.py` and is tested locally against a SQLite MLflow
+store (`pip install -e ".[tracking]"`), so the notebooks stay thin.
+
+<!-- Databricks screenshots: docs/databricks_runs.png (Experiments table), docs/databricks_registry.png (model with champion alias) -->
+
 ## Project structure
 
 ```
@@ -135,10 +166,12 @@ src/carbon_forecast/
   model.py      per-horizon gradient boosting, shrinkage, split-conformal intervals
   evaluate.py   rolling-origin backtest and baselines
   train.py      CLI: fetch, backtest, train, save model + metrics + plot
+  tracking.py   MLflow: backtest runs, ablation and sweep grids, pyfunc packaging and registration
+databricks/     notebooks: Delta ingest, MLflow experiments, Unity Catalog registry, batch forecasts
 scripts/
   update_readme.py  rewrites the Results section from models/metrics.json
   api.py        FastAPI service
-tests/          data, features (incl. leakage test), model, API
+tests/          data, features (incl. leakage test), model, API, MLflow tracking
 ```
 
 ## Limitations and next steps
