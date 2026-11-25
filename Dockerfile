@@ -1,9 +1,20 @@
 FROM python:3.12-slim
 
+# ENV PYTHONDONTWRITEBYTECODE=1 \
+#     PYTHONUNBUFFERED=1 \
+#     PIP_NO_CACHE_DIR=1 \
+#     MODEL_DIR=/app/models
+
+# Render's containers report the host's CPU count but only get a fraction of one CPU.
+# Without these limits, scikit-learn/OpenMP start dozens of threads that contend and stall.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    MODEL_DIR=/app/models
+    MODEL_DIR=/app/models \
+    OMP_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1 \
+    LOKY_MAX_CPU_COUNT=1
 
 WORKDIR /app
 
@@ -14,7 +25,7 @@ RUN pip install .
 # Train at build time on the latest data, so every deploy (including the weekly scheduled one)
 # ships a model trained up to that day. The backtest results are baked into /model.
 # CI overrides this with "--synthetic --days 60 --skip-backtest" so builds don't depend on the live API.
-ARG TRAIN_ARGS="--days 365 --folds 6"
+ARG TRAIN_ARGS="--days 180 --folds 6"
 RUN python -m carbon_forecast.train ${TRAIN_ARGS}
 
 RUN useradd --create-home appuser && chown -R appuser /app
