@@ -116,7 +116,7 @@ def build_dataset(
     df["slot"] = slot
     df["slot_sin"] = np.sin(2 * np.pi * slot / config.STEPS_PER_DAY)
     df["slot_cos"] = np.cos(2 * np.pi * slot / config.STEPS_PER_DAY)
-    df["day_of_week"] = local.dayofweek.to_numpy()
+    df["day_of_week"] = local.day_of_week.to_numpy()
     df["is_weekend"] = (df["day_of_week"] >= 5).astype(int)
     hol = _uk_holidays()
     df["is_holiday"] = np.fromiter((d in hol for d in local.date), dtype=int, count=len(local))

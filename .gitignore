@@ -10,3 +10,4 @@ models/*
 data/
 mlruns/
 mlflow.db
+.DS_Store

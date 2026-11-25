@@ -15,7 +15,7 @@ def synthetic_intensity(days: int = 120, seed: int = 0, end: str = "2026-06-01T0
     idx = pd.date_range(end=pd.Timestamp(end), periods=days * 48, freq="30min", name="from")
     t = np.arange(len(idx))
     daily = 40 * np.sin(2 * np.pi * (t % 48) / 48 - np.pi / 2)
-    weekly = -15 * (idx.dayofweek >= 5)
+    weekly = -15 * (idx.day_of_week >= 5)
     # AR(1) "wind" component that moves intensity over several days.
     wind = np.zeros(len(idx))
     for i in range(1, len(idx)):
